@@ -2,12 +2,20 @@ package com.project;
 
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.event.ActionEvent;
 import javafx.application.Platform;
 import java.net.URL;
 import java.util.ResourceBundle;
 import javafx.fxml.Initializable;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,8 +44,12 @@ public class Controller implements Initializable {
     private static final String TEXT_MODEL   = "gemma3:1b";
     private static final String VISION_MODEL = "llava-phi3";
 
-    @FXML private Button buttonCallStream, buttonCallComplete, buttonBreak, buttonPicture;
-    @FXML private Text textInfo;
+    @FXML private Button send, submit, cancel, clip,limpiar;
+    // @FXML private Text textInfo;
+    @FXML private VBox chatBox;
+    @FXML private TextField textfi;
+    @FXML private ScrollPane scrollPane;
+
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private CompletableFuture<HttpResponse<InputStream>> streamRequest;
@@ -55,30 +67,113 @@ public class Controller implements Initializable {
 
     // --- UI actions ---
 
-    @FXML
-    private void callStream(ActionEvent event) {
-        textInfo.setText("");
-        setButtonsRunning();
-        isCancelled.set(false);
+    private void addUserMessage(String msg) {
+        Platform.runLater(() -> {
+            Label bubble = new Label(msg);
+            bubble.setWrapText(true);
+            bubble.setStyle(
+                "-fx-background-color: #DCF8C6;" +   // verde claro estilo WhatsApp
+                "-fx-padding: 10;" +
+                "-fx-background-radius: 10;" +
+                "-fx-font-size: 14px;"
+            );
 
-        ensureModelLoaded(TEXT_MODEL).whenComplete((v, err) -> {
-            if (err != null) {
-                Platform.runLater(() -> { textInfo.setText("Error loading model."); setButtonsIdle(); });
-                return;
-            }
-            executeTextRequest(TEXT_MODEL, "Why is the sky blue?", true);
+            HBox container = new HBox(bubble);
+            container.setAlignment(Pos.CENTER_RIGHT);   // alineado a la derecha
+            container.setPadding(new Insets(5, 5, 5, 5));
+
+            chatBox.getChildren().add(container);
+            scrollPane.setVvalue(1.0);
         });
     }
 
+    private void addAssistantMessage(String msg) {
+        Platform.runLater(() -> {
+            Label bubble = new Label(msg);
+            bubble.setWrapText(true);
+            bubble.setStyle(
+                "-fx-background-color: #FFFFFF;" +   // blanco estilo ChatGPT
+                "-fx-padding: 10;" +
+                "-fx-background-radius: 10;" +
+                "-fx-font-size: 14px;" +
+                "-fx-border-color: #E0E0E0;" +
+                "-fx-border-radius: 10;"
+            );
+
+            HBox container = new HBox(bubble);
+            container.setAlignment(Pos.CENTER_LEFT);   // alineado a la izquierda
+            container.setPadding(new Insets(5, 5, 5, 5));
+
+            chatBox.getChildren().add(container);
+            scrollPane.setVvalue(1.0);
+        });
+    }
+
+    private void addSystemMessage(String msg) {
+        Platform.runLater(() -> {
+            Label bubble = new Label(msg);
+            bubble.setWrapText(true);
+            bubble.setStyle(
+                "-fx-background-color: #EEEEEE;" +
+                "-fx-padding: 8;" +
+                "-fx-background-radius: 8;" +
+                "-fx-font-size: 12px;" +
+                "-fx-text-fill: #555555;"
+            );
+
+            HBox container = new HBox(bubble);
+            container.setAlignment(Pos.CENTER);   // centrado
+            container.setPadding(new Insets(5, 5, 5, 5));
+
+            chatBox.getChildren().add(container);
+            scrollPane.setVvalue(1.0);
+        });
+    }
+
+
+
+    @FXML
+    private void callStream(ActionEvent event) {
+        // 1. Obtener el texto del usuario
+        String prompt = textfi.getText().trim();
+        if (prompt.isEmpty()) return;
+
+        // 2. Mostrar el mensaje del usuario en el chat
+        addUserMessage(prompt);
+
+        // 3. Limpiar el campo de texto
+        textfi.clear();
+
+        // 4. Preparar el sistema
+        addSystemMessage("Thinking...");
+        setButtonsRunning();
+        isCancelled.set(false);
+
+        // 5. Cargar modelo y ejecutar con el texto del usuario
+        ensureModelLoaded(TEXT_MODEL).whenComplete((v, err) -> {
+            if (err != null) {
+                Platform.runLater(() -> { 
+                    addSystemMessage("Error loading model."); 
+                    setButtonsIdle(); 
+                });
+                return;
+            }
+
+            // 6. Llamar al modelo con el prompt real del usuario
+            executeTextRequest(TEXT_MODEL, prompt, true);
+        });
+    }
+
+
     @FXML
     private void callComplete(ActionEvent event) {
-        textInfo.setText("");
+        addSystemMessage("");
         setButtonsRunning();
         isCancelled.set(false);
 
         ensureModelLoaded(TEXT_MODEL).whenComplete((v, err) -> {
             if (err != null) {
-                Platform.runLater(() -> { textInfo.setText("Error loading model."); setButtonsIdle(); });
+                Platform.runLater(() -> { addSystemMessage("Error loading model."); setButtonsIdle(); });
                 return;
             }
             executeTextRequest(TEXT_MODEL, "Tell me a haiku.", false);
@@ -87,7 +182,7 @@ public class Controller implements Initializable {
 
     @FXML
     private void callPicture(ActionEvent event) {
-        textInfo.setText("");
+        addSystemMessage("");
         setButtonsRunning();
         isCancelled.set(false);
 
@@ -104,9 +199,9 @@ public class Controller implements Initializable {
             fc.setInitialDirectory(initialDir);
         }
 
-        File file = fc.showOpenDialog(buttonPicture.getScene().getWindow());
+        File file = fc.showOpenDialog(clip.getScene().getWindow());
         if (file == null) {
-            Platform.runLater(() -> { textInfo.setText("No file selected."); setButtonsIdle(); });
+            Platform.runLater(() -> { addSystemMessage("No file selected."); setButtonsIdle(); });
             return;
         }
 
@@ -118,13 +213,13 @@ public class Controller implements Initializable {
             base64Image = Base64.getEncoder().encodeToString(bytes);
         } catch (Exception e) {
             e.printStackTrace();
-            Platform.runLater(() -> { textInfo.setText("Error reading image."); setButtonsIdle(); });
+            Platform.runLater(() -> { addSystemMessage("Error reading image."); setButtonsIdle(); });
             return;
         }
 
         ensureModelLoaded(VISION_MODEL).whenComplete((v, err) -> {
             if (err != null) {
-                Platform.runLater(() -> { textInfo.setText("Error loading model."); setButtonsIdle(); });
+                Platform.runLater(() -> { addSystemMessage("Error loading model."); setButtonsIdle(); });
                 return;
             }
             executeImageRequest(VISION_MODEL, "Describe what's in this picture", base64Image);
@@ -137,7 +232,7 @@ public class Controller implements Initializable {
         cancelStreamRequest();
         cancelCompleteRequest();
         Platform.runLater(() -> {
-            textInfo.setText("Request cancelled.");
+            addSystemMessage("Request cancelled.");
             setButtonsIdle();
         });
     }
@@ -159,7 +254,7 @@ public class Controller implements Initializable {
             .build();
 
         if (stream) {
-            Platform.runLater(() -> textInfo.setText("Wait stream ... " + prompt));
+            Platform.runLater(() -> addSystemMessage("Wait stream ... " + prompt));
             isFirst = true;
 
             streamRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
@@ -175,12 +270,12 @@ public class Controller implements Initializable {
                 });
 
         } else {
-            Platform.runLater(() -> textInfo.setText("Wait complete ..."));
+            Platform.runLater(() -> addSystemMessage("Wait complete ..."));
 
             completeRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
                     String responseText = safeExtractTextResponse(response.body());
-                    Platform.runLater(() -> { textInfo.setText(responseText); setButtonsIdle(); });
+                    Platform.runLater(() -> { addSystemMessage(responseText); setButtonsIdle(); });
                     return response;
                 })
                 .exceptionally(e -> {
@@ -193,7 +288,7 @@ public class Controller implements Initializable {
 
     // Image + prompt (non-stream) using vision model
     private void executeImageRequest(String model, String prompt, String base64Image) {
-        Platform.runLater(() -> textInfo.setText("Analyzing picture ..."));
+        Platform.runLater(() -> addSystemMessage("Analyzing picture ..."));
 
         JSONObject body = new JSONObject()
             .put("model", model)
@@ -223,12 +318,18 @@ public class Controller implements Initializable {
                 }
 
                 final String toShow = msg;
-                Platform.runLater(() -> { textInfo.setText(toShow); setButtonsIdle(); });
+                Platform.runLater(() -> { 
+                    addSystemMessage(toShow); setButtonsIdle(); 
+                    scrollPane.setVvalue(1.0);
+                });
                 return resp;
             })
             .exceptionally(e -> {
                 if (!isCancelled.get()) e.printStackTrace();
-                Platform.runLater(() -> { textInfo.setText("Request failed."); setButtonsIdle(); });
+                Platform.runLater(() -> { 
+                    addSystemMessage("Request failed."); setButtonsIdle(); 
+                    scrollPane.setVvalue(1.0);
+                });
                 return null;
             });
     }
@@ -236,6 +337,10 @@ public class Controller implements Initializable {
     // Stream reader for text responses
     private void handleStreamResponse() {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(currentInputStream, StandardCharsets.UTF_8))) {
+
+            HBox assistantBubble = null;
+            Label assistantLabel = null;
+
             String line;
             while ((line = reader.readLine()) != null) {
                 if (isCancelled.get()) break;
@@ -245,21 +350,51 @@ public class Controller implements Initializable {
                 String chunk = jsonResponse.optString("response", "");
                 if (chunk.isEmpty()) continue;
 
-                if (isFirst) {
-                    Platform.runLater(() -> textInfo.setText(chunk));
-                    isFirst = false;
+                if (assistantBubble == null) {
+                    // Primer chunk → crear burbuja de IA
+                    assistantLabel = new Label(chunk);
+                    assistantLabel.setWrapText(true);
+                    assistantLabel.setStyle(
+                        "-fx-background-color: #FFFFFF;" +
+                        "-fx-padding: 10;" +
+                        "-fx-background-radius: 10;" +
+                        "-fx-font-size: 14px;" +
+                        "-fx-border-color: #E0E0E0;" +
+                        "-fx-border-radius: 10;"
+                    );
+
+                    assistantBubble = new HBox(assistantLabel);
+                    assistantBubble.setAlignment(Pos.CENTER_LEFT);
+                    assistantBubble.setPadding(new Insets(5, 5, 5, 5));
+
+                    HBox finalBubble = assistantBubble;
+                    Platform.runLater(() -> {
+                        chatBox.getChildren().add(finalBubble);
+                        scrollPane.setVvalue(1.0);
+                    });
+
                 } else {
-                    Platform.runLater(() -> textInfo.setText(textInfo.getText() + chunk));
+                    // Siguientes chunks → añadir texto a la misma burbuja
+                    Label finalLabel = assistantLabel;
+                    Platform.runLater(() ->{ 
+                        finalLabel.setText(finalLabel.getText() + chunk);
+                        scrollPane.setVvalue(1.0);
+                    });
                 }
             }
+
         } catch (Exception e) {
             e.printStackTrace();
-            Platform.runLater(() -> { textInfo.setText("Error during streaming."); setButtonsIdle(); });
+            Platform.runLater(() -> {
+                addSystemMessage("Error during streaming.");
+                setButtonsIdle();
+            });
         } finally {
             try { if (currentInputStream != null) currentInputStream.close(); } catch (Exception ignore) {}
             Platform.runLater(this::setButtonsIdle);
         }
     }
+
 
     // --- Small utils ---
 
@@ -311,17 +446,17 @@ public class Controller implements Initializable {
     }
 
     private void setButtonsRunning() {
-        buttonCallStream.setDisable(true);
-        buttonCallComplete.setDisable(true);
-        buttonPicture.setDisable(true);
-        buttonBreak.setDisable(false);
+        send.setDisable(true);
+        submit.setDisable(true);
+        clip.setDisable(true);
+        cancel.setDisable(false);
     }
 
     private void setButtonsIdle() {
-        buttonCallStream.setDisable(false);
-        buttonCallComplete.setDisable(false);
-        buttonPicture.setDisable(false);
-        buttonBreak.setDisable(true);
+        send.setDisable(false);
+        submit.setDisable(false);
+        clip.setDisable(false);
+        cancel.setDisable(true);
         streamRequest = null;
         completeRequest = null;
     }
@@ -351,7 +486,7 @@ public class Controller implements Initializable {
 
                 if (loaded) return CompletableFuture.completedFuture(null);
 
-                Platform.runLater(() -> textInfo.setText("Loading model ..."));
+                Platform.runLater(() -> addSystemMessage("Loading model ..."));
 
                 String preloadJson = new JSONObject()
                     .put("model", modelName)
@@ -369,4 +504,13 @@ public class Controller implements Initializable {
                         .thenAccept(r -> { /* warmed */ });
             });
     }
+
+    @FXML
+    private void clearChat(ActionEvent event) {
+         Platform.runLater(() -> {
+             
+             chatBox.getChildren().clear();
+        });
+    }
+
 }
