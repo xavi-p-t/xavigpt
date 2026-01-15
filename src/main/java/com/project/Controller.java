@@ -59,6 +59,10 @@ public class Controller implements Initializable {
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private Future<?> streamReadingTask;
     private volatile boolean isFirst = false;
+    private String lastImageBase64 = null;
+    private boolean useImage = false;
+
+
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
@@ -134,35 +138,42 @@ public class Controller implements Initializable {
 
     @FXML
     private void callStream(ActionEvent event) {
-        // 1. Obtener el texto del usuario
         String prompt = textfi.getText().trim();
         if (prompt.isEmpty()) return;
 
-        // 2. Mostrar el mensaje del usuario en el chat
         addUserMessage(prompt);
-
-        // 3. Limpiar el campo de texto
         textfi.clear();
 
-        // 4. Preparar el sistema
-        addSystemMessage("Thinking...");
         setButtonsRunning();
         isCancelled.set(false);
 
-        // 5. Cargar modelo y ejecutar con el texto del usuario
+        // Si el usuario activó el modo imagen
+        if (useImage && lastImageBase64 != null) {
+            addSystemMessage("Analyzing image + text...");
+            ensureModelLoaded(VISION_MODEL).whenComplete((v, err) -> {
+                if (err != null) {
+                    addSystemMessage("Error loading vision model.");
+                    setButtonsIdle();
+                    return;
+                }
+                executeImageRequest(VISION_MODEL, prompt, lastImageBase64);
+            });
+            return;
+        }
+
+        // Modo texto normal
+        addSystemMessage("Thinking...");
         ensureModelLoaded(TEXT_MODEL).whenComplete((v, err) -> {
             if (err != null) {
-                Platform.runLater(() -> { 
-                    addSystemMessage("Error loading model."); 
-                    setButtonsIdle(); 
-                });
+                addSystemMessage("Error loading model.");
+                setButtonsIdle();
                 return;
             }
-
-            // 6. Llamar al modelo con el prompt real del usuario
             executeTextRequest(TEXT_MODEL, prompt, true);
         });
     }
+
+
 
 
     @FXML
@@ -182,49 +193,43 @@ public class Controller implements Initializable {
 
     @FXML
     private void callPicture(ActionEvent event) {
-        addSystemMessage("");
-        setButtonsRunning();
-        isCancelled.set(false);
-
-        // Choose image file
         FileChooser fc = new FileChooser();
         fc.setTitle("Choose an image");
-        fc.getExtensionFilters().addAll(
+        fc.getExtensionFilters().add(
             new FileChooser.ExtensionFilter("Images", "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.gif")
         );
 
-        // set default dir to current working directory
-        File initialDir = new File(System.getProperty("user.dir"));
-        if (initialDir.exists() && initialDir.isDirectory()) {
-            fc.setInitialDirectory(initialDir);
-        }
-
         File file = fc.showOpenDialog(clip.getScene().getWindow());
         if (file == null) {
-            Platform.runLater(() -> { addSystemMessage("No file selected."); setButtonsIdle(); });
+            addSystemMessage("No file selected.");
             return;
         }
 
-
-        // Read file -> base64
-        final String base64Image;
         try {
             byte[] bytes = Files.readAllBytes(file.toPath());
-            base64Image = Base64.getEncoder().encodeToString(bytes);
+            lastImageBase64 = Base64.getEncoder().encodeToString(bytes);
+            addSystemMessage("Image loaded. Press 'Use Img' to enable it.");
         } catch (Exception e) {
-            e.printStackTrace();
-            Platform.runLater(() -> { addSystemMessage("Error reading image."); setButtonsIdle(); });
+            addSystemMessage("Error reading image.");
+        }
+    }
+
+    @FXML
+    private void toggleImageUsage(ActionEvent event) {
+        if (lastImageBase64 == null) {
+            addSystemMessage("No image loaded.");
             return;
         }
 
-        ensureModelLoaded(VISION_MODEL).whenComplete((v, err) -> {
-            if (err != null) {
-                Platform.runLater(() -> { addSystemMessage("Error loading model."); setButtonsIdle(); });
-                return;
-            }
-            executeImageRequest(VISION_MODEL, "Describe what's in this picture", base64Image);
-        });
+        useImage = !useImage;
+
+        if (useImage) {
+            addSystemMessage("Image mode ON. Your next message will use the image.");
+        } else {
+            addSystemMessage("Image mode OFF.");
+        }
     }
+
 
     @FXML
     private void callBreak(ActionEvent event) {
@@ -233,6 +238,7 @@ public class Controller implements Initializable {
         cancelCompleteRequest();
         Platform.runLater(() -> {
             addSystemMessage("Request cancelled.");
+            scrollPane.setVvalue(1.0);
             setButtonsIdle();
         });
     }
@@ -254,7 +260,10 @@ public class Controller implements Initializable {
             .build();
 
         if (stream) {
-            Platform.runLater(() -> addSystemMessage("Wait stream ... " + prompt));
+            Platform.runLater(() ->{ 
+                addSystemMessage("Wait stream ... " + prompt);
+                scrollPane.setVvalue(1.0);
+            });
             isFirst = true;
 
             streamRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
@@ -270,12 +279,18 @@ public class Controller implements Initializable {
                 });
 
         } else {
-            Platform.runLater(() -> addSystemMessage("Wait complete ..."));
+            Platform.runLater(() ->{
+                 addSystemMessage("Wait complete ...");
+                 scrollPane.setVvalue(1.0);
+                });
 
             completeRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
                     String responseText = safeExtractTextResponse(response.body());
-                    Platform.runLater(() -> { addSystemMessage(responseText); setButtonsIdle(); });
+                    Platform.runLater(() -> { 
+                        addSystemMessage(responseText); setButtonsIdle();
+                        scrollPane.setVvalue(1.0);
+                     });
                     return response;
                 })
                 .exceptionally(e -> {
@@ -288,7 +303,10 @@ public class Controller implements Initializable {
 
     // Image + prompt (non-stream) using vision model
     private void executeImageRequest(String model, String prompt, String base64Image) {
-        Platform.runLater(() -> addSystemMessage("Analyzing picture ..."));
+        Platform.runLater(() -> {
+            addSystemMessage("Analyzing picture ...");
+            scrollPane.setVvalue(1.0);
+        });
 
         JSONObject body = new JSONObject()
             .put("model", model)
@@ -319,16 +337,18 @@ public class Controller implements Initializable {
 
                 final String toShow = msg;
                 Platform.runLater(() -> { 
-                    addSystemMessage(toShow); setButtonsIdle(); 
+                    addSystemMessage(toShow); 
                     scrollPane.setVvalue(1.0);
+                    setButtonsIdle(); 
                 });
                 return resp;
             })
             .exceptionally(e -> {
                 if (!isCancelled.get()) e.printStackTrace();
                 Platform.runLater(() -> { 
-                    addSystemMessage("Request failed."); setButtonsIdle(); 
+                    addSystemMessage("Request failed."); 
                     scrollPane.setVvalue(1.0);
+                    setButtonsIdle(); 
                 });
                 return null;
             });
