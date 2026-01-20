@@ -16,7 +16,10 @@ public class Main extends Application {
     public void start(Stage stage) throws Exception {
 
         // Carrega la vista inicial des del fitxer FXML
-        Parent root = FXMLLoader.load(getClass().getResource("/assets/layout.fxml"));
+        FXMLLoader loader = new FXMLLoader(getClass().getResource("/assets/layout.fxml"));
+        Parent root = loader.load();
+        Controller controller = loader.getController();
+
         Scene scene = new Scene(root);
 
         stage.setScene(scene);
@@ -24,6 +27,10 @@ public class Main extends Application {
         stage.setWidth(WINDOW_WIDTH);
         stage.setHeight(WINDOW_HEIGHT);
         stage.show();
+        stage.setOnCloseRequest(event -> {
+            controller.shutdown();
+        });
+
 
         // Afegeix una icona només si no és un Mac
         if (!System.getProperty("os.name").contains("Mac")) {

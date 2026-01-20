@@ -67,6 +67,8 @@ public class Controller implements Initializable {
     @Override
     public void initialize(URL url, ResourceBundle rb) {
         setButtonsIdle();
+
+        chatBox.heightProperty().addListener((obs, oldVal, newVal) -> scrollPane.setVvalue(1.0));
     }
 
     // --- UI actions ---
@@ -312,7 +314,7 @@ public class Controller implements Initializable {
             .put("model", model)
             .put("prompt", prompt)
             .put("images", new JSONArray().put(base64Image))
-            .put("stream", false)
+            .put("stream", true)
             .put("keep_alive", "10m")
             .put("options", new JSONObject()
                 .put("num_ctx", 2048)     // lower context to reduce memory
@@ -325,33 +327,21 @@ public class Controller implements Initializable {
             .POST(BodyPublishers.ofString(body.toString()))
             .build();
 
-        completeRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenApply(resp -> {
-                int code = resp.statusCode();
-                String bodyStr = resp.body();
-
-                String msg = tryParseAnyMessage(bodyStr);
-                if (msg == null || msg.isBlank()) {
-                    msg = (code >= 200 && code < 300) ? "(empty response)" : "HTTP " + code + ": " + bodyStr;
-                }
-
-                final String toShow = msg;
-                Platform.runLater(() -> { 
-                    addSystemMessage(toShow); 
-                    scrollPane.setVvalue(1.0);
-                    setButtonsIdle(); 
-                });
-                return resp;
-            })
-            .exceptionally(e -> {
-                if (!isCancelled.get()) e.printStackTrace();
-                Platform.runLater(() -> { 
-                    addSystemMessage("Request failed."); 
-                    scrollPane.setVvalue(1.0);
-                    setButtonsIdle(); 
-                });
-                return null;
+        streamRequest = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+        .thenApply(response -> {
+            currentInputStream = response.body();
+            streamReadingTask = executorService.submit(this::handleStreamResponse);
+            return response;
+        })
+        .exceptionally(e -> {
+            if (!isCancelled.get()) e.printStackTrace();
+            Platform.runLater(() -> {
+                addSystemMessage("Error during image streaming.");
+                setButtonsIdle();
             });
+            return null;
+        });
+
     }
 
     // Stream reader for text responses
@@ -532,5 +522,27 @@ public class Controller implements Initializable {
              chatBox.getChildren().clear();
         });
     }
+
+    public void shutdown() {
+        try {
+            isCancelled.set(true);
+
+            cancelStreamRequest();
+            cancelCompleteRequest();
+
+            if (currentInputStream != null) {
+                currentInputStream.close();
+            }
+
+            executorService.shutdownNow();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            Platform.exit();
+            System.exit(0);
+        }
+    }
+
 
 }
